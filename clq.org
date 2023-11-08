@@ -1,4 +1,5 @@
 #+TITLE: The =qicl= interpreter
+#+PROPERTY: header-args :tangle qicl.lisp
 
 * General comments
 
@@ -13,7 +14,7 @@ Our programming language will be model by an abstract machine of \(n\) qubits \(
 whose state will be given by a quantum state \(v\) and a \(n\)-bit measurement register.
 We can consider that \(v \in \mathcal{C}^{2^n}\).
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defstruct machine
     quantum-state
     measurement-register)
@@ -25,7 +26,7 @@ We can consider that \(v \in \mathcal{C}^{2^n}\).
 The remaining discussion assumes a basic quantum mechanics background. Let's define a \(n\)
 qubit quantum state:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun make-quantum-state (n)
     (let ((s (make-array (expt 2 n) :initial-element 0.0d0)))
       (setf (aref s 0) 1.0d0)
@@ -40,7 +41,7 @@ indicating that this is the only contribution to the initial state. Next, we def
 to retrieve the number of qubits for a given Hilbert space size. This amounts to compute
 the binary logarithm (number of bits in binary representation):
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun dimension-qubits (d)
     (- (integer-length d) 1))
 #+end_src
@@ -50,7 +51,7 @@ the binary logarithm (number of bits in binary representation):
 
 The propagation of the quantum system is then implemented using linear algebra operations:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun apply-operator (unitary-operator ket)
     (let* ((oper-size (array-dimension mat 0))
   	 (new-ket (make-array oper-size :initial-element 0.0d0)))
