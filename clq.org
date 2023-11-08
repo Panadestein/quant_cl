@@ -1,9 +1,8 @@
-#+TITLE: The =qicl= interpreter
-#+PROPERTY: header-args :tangle qicl.lisp
+#+TITLE: The =clq= interpreter
 
 * General comments
 
-- We will build an interpreter called =qicl= that supports gates and measurements
+- We will build an interpreter called =clq= that supports gates and measurements
 - All quantum gates are transmuted into a single linear operator that acts on
 the Hilbert space of the wave function
 - The language will have a Lisp-like syntax, and will use Common Lisp array syntax

@@ -6,6 +6,6 @@ by Robert Smith, which you can find [[https://www.stylewarning.com/posts/quantum
 
 * Pro tip
 
-Use Emacs to explore the source code, you definitely need check out [[https://slime.common-lisp.dev/][Slime]].
+Use Emacs to explore the source code, you definitely need to check out [[https://slime.common-lisp.dev/][Slime]].
 
 
