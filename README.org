@@ -1,0 +1,11 @@
+#+TITLE: A quantum interpreter written in Common Lisp
+
+This repository contains my implementation of a small quantum computing
+interpreter written in Common Lisp. It is based on the excellent tutorial
+by Robert Smith, which you can find [[https://www.stylewarning.com/posts/quantum-interpreter/][here]].
+
+* Pro tip
+
+Use Emacs to explore the source code, you definitely need check out [[https://slime.common-lisp.dev/][Slime]].
+
+

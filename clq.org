@@ -1,0 +1,66 @@
+#+TITLE: The =qicl= interpreter
+
+* General comments
+
+- We will build an interpreter called =qicl= that supports gates and measurements
+- All quantum gates are transmuted into a single linear operator that acts on
+the Hilbert space of the wave function
+- The language will have a Lisp-like syntax, and will use Common Lisp array syntax
+
+* Code
+
+Our programming language will be model by an abstract machine of \(n\) qubits \(M_n\),
+whose state will be given by a quantum state \(v\) and a \(n\)-bit measurement register.
+We can consider that \(v \in \mathcal{C}^{2^n}\).
+
+#+begin_src lisp
+  (defstruct machine
+    quantum-state
+    measurement-register)
+#+end_src
+
+#+RESULTS:
+: MACHINE
+
+The remaining discussion assumes a basic quantum mechanics background. Let's define a \(n\)
+qubit quantum state:
+
+#+begin_src lisp
+  (defun make-quantum-state (n)
+    (let ((s (make-array (expt 2 n) :initial-element 0.0d0)))
+      (setf (aref s 0) 1.0d0)
+      s))
+#+end_src
+
+#+RESULTS:
+: MAKE-QUANTUM-STATE
+
+The above function will return the ket \(|00 \ldots 0\rangle\). It has a coefficient of one,
+indicating that this is the only contribution to the initial state. Next, we define a function
+to retrieve the number of qubits for a given Hilbert space size. This amounts to compute
+the binary logarithm (number of bits in binary representation):
+
+#+begin_src lisp
+  (defun dimension-qubits (d)
+    (- (integer-length d) 1))
+#+end_src
+
+#+RESULTS:
+: DIMENSION-QUBITS
+
+The propagation of the quantum system is then implemented using linear algebra operations:
+
+#+begin_src lisp
+  (defun apply-operator (unitary-operator ket)
+    (let* ((oper-size (array-dimension mat 0))
+  	 (new-ket (make-array oper-size :initial-element 0.0d0)))
+      (dotimes (i oper-size)
+        (let ((element 0.0d0))
+  	(dotimes (j oper-size)
+  	  (incf element (* (aref unitary-operator i j) (aref ket j))))
+  	(setf (aref new-ket i) element)))
+      (replace ket new-ket)))
+#+end_src
+
+#+RESULTS:
+: APPLY-OPERATOR
