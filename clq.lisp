@@ -19,3 +19,23 @@
 	  (incf element (* (aref unitary-operator i j) (aref ket j))))
 	(setf (aref new-ket i) element)))
     (replace ket new-ket)))
+
+(defun compose-operator (unitary-left unitary-right)
+  (let* ((m (array-dimension unitary-left 0))
+	 (n (array-dimension unitary-left 1))
+	 (p (array-dimension unitary-right 1))
+	 (unitary-new (make-array (list m p) :initial-element 0.0d0)))
+    (dotimes (i m unitary-new)
+      (dotimes (j p)
+	(let ((dot-prod 0.0d0))
+	  (dotimes (k n)
+	    (setf dot-prod (+ dot-prod
+			      (* (aref unitary-left i k)
+				 (aref unitary-right k j)))))
+	  (setf (aref unitary-new i j) dot-prod))))))
+
+(defun observe (machine)
+  (let ((b (sample (machine-quantum-state machine))))
+    (collapse (machine-quantum-state machine) b)
+    (setf (machine-measurement-register machine) b)
+    machine))

@@ -64,3 +64,121 @@ The propagation of the quantum system is then implemented using linear algebra o
 
 #+RESULTS:
 : APPLY-OPERATOR
+
+#+begin_src lisp :tangle yes
+  (defun compose-operator (unitary-left unitary-right)
+    (let* ((m (array-dimension unitary-left 0))
+  	 (n (array-dimension unitary-left 1))
+  	 (p (array-dimension unitary-right 1))
+  	 (unitary-new (make-array (list m p) :initial-element 0.0d0)))
+      (dotimes (i m unitary-new)
+        (dotimes (j p)
+  	(let ((dot-prod 0.0d0))
+  	  (dotimes (k n)
+  	    (setf dot-prod (+ dot-prod
+  			      (* (aref unitary-left i k)
+  				 (aref unitary-right k j)))))
+  	  (setf (aref unitary-new i j) dot-prod))))))
+#+end_src
+
+#+RESULTS:
+: COMPOSE-OPERATOR
+
+Provided the linear algebra machinery, we proceed to implement measurements. Again, domain knowledge
+is needed here, in particular regarding the collapse of the wave function.
+
+#+begin_src lisp :tangle yes
+  (defun observe (machine)
+    (let ((b (sample (machine-quantum-state machine))))
+      (collapse (machine-quantum-state machine) b)
+      (setf (machine-measurement-register machine) b)
+      machine))
+#+end_src
+
+#+RESULTS:
+: OBSERVE
+
+In the code above the wave function is collapsed and saved in the register using the automatically
+generated accessor of =machine=. The next section is more interesting, as it deals with the sampling
+process. In statistical terms, we want to do is to sample a discrete random variable whose CDF is:
+
+\begin{equation}
+  F(q_j) = \sum_{i \le j}p(q_i)
+\end{equation}
+
+If we have \(U = \text{Uniform}(0, 1)\) then we can leverage this to sample:
+
+\begin{equation}
+  \text{Pr}(U \in (F(q_{j-1}), F(q_{j})]) = \text{Pr}(F(q_{j-1}) < U \le F(q_{j})) = F(q_{j}) - F(q_{j-1}) = p(q_{j})
+\end{equation}
+
+We can implement the above equations as follows:
+
+#+begin_src lisp
+  (defun sample (state)
+    (let ((u (random 1.0d0)))
+      (dotimes (i (length state))
+        (decf r (expt (abs (aref state i)) 2))
+        (when (minusp r) (return i)))))
+#+end_src
+
+#+RESULTS:
+: SAMPLE
+
+The collapse of the wave function implies this realization:
+
+#+begin_src lisp
+  (defun collapse (state qubit)
+    (fill state 0.0d0)
+    (setf (aref state qubit) 1.0d0))
+#+end_src
+
+#+RESULTS:
+: COLLAPSE
+
+Now we can proceed to define some gates. Let's start with the identity:
+
+#+begin_src lisp
+  (defparameter +I+ #2A((1 0)
+  		      (0 1))
+  	      "The identity gate.")
+#+end_src
+
+#+RESULTS:
+: +I+
+
+Then a function to apply a generic gate:
+
+#+begin_src lisp
+  (defun apply-gate (state unitary-operator qubits)
+    (assert (= (length qubits)
+  	     (dimension-qubits (array-dimension unitary-operator 0))))
+    (if (= (length qubits) 1)
+        (%apply-singleq-gate state unitary-operator (first qubits))
+        (%apply-multiq-gate state unitary-operator qubits)))
+#+end_src
+
+#+RESULTS:
+: APPLY-GATE
+
+We need an implementation of the Kronecker product for generating multi-qubit gates:
+
+#+begin_src lisp
+  (defun kronecker-product (unitary-A unitary-B)
+    (destructuring-bind (m n) (array-dimensions unitary-A)
+      (destructuring-bind (p q) (array-dimensions unitary-B)
+        (let ((kron-dot-unitary (make-array (list (* m n) (* p q)))))
+  	(dotimes (i m kron-dot-unitary)
+  	  (dotimes (j n)
+  	    (let ((unitary-A-ij (aref unitary-A i j))
+  		  (pointer-row (* i p))
+  		  (pointer-col (* j q)))
+  	      (dotimes (k p)
+  		(dotimes (l q)
+  		  (setf (aref kron-dot-unitary
+  			      (+ pointer-row k) (+ pointer-col l))
+  			(* unitary-A-ij (aref unitary-B k l))))))))))))
+#+end_src
+
+#+RESULTS:
+: KRONECKER-PRODUCT
