@@ -182,3 +182,87 @@ We need an implementation of the Kronecker product for generating multi-qubit ga
 
 #+RESULTS:
 : KRONECKER-PRODUCT
+
+The discussion then focus on using the Kronecker product to generate the action of a
+gate \(g\) on a qubit \(i\), or in a continuous range of qubits. This can be achieved with
+the following lift operator:
+
+\begin{equation}
+ \text{lift}(g, i, n) = \mathcal{I} \otimes \ldots \otimes \mathcal{I} \otimes g \otimes \ldots \mathcal{I}
+\end{equation}
+
+where the first \(ldots\) covers \(n - i - 3\) factors and the second one \(i - 1\) factors.
+
+#+begin_src lisp
+  (defun kronecker-expt (unitary n)
+    (cond
+      ((< n 1) #2A((1)))
+      ((= n 1) unitary)
+      (t (kronecker-product (kronecker-expt unitary (- n 1)) unitary))))
+#+end_src
+
+#+RESULTS:
+: KRONECKER-EXPT
+
+With the above definition, the lift operator can be implemented as:
+
+#+begin_src lisp
+  (defun lift (unitary i n)
+    (let ((left-factors (kronecker-expt +I+ (- n i (dimension-qubits
+  						  (array-dimensions unitary 0)))))
+  	(right-factors (kronecker-expt +I+ i)))
+      (kronecker-product left-factors
+  		       (kronecker-product unitary right-factors))))
+#+end_src
+
+#+RESULTS:
+: LIFT
+
+Note that the above function accounts for multiple adjacent qubit gates. Multiple non-adjacent
+qubit gates' actions are a bit trickier to handle. The idea is to generate a permutation matrix
+\(\Pi\) that will set the qubit temporarily adjacent, apply the gate, and restores the initial order:
+
+\begin{equation}
+ \Pi^{-1}\text{lift}(g, 0, n)\Pi
+\end{equation}
+
+We then define the *SWAP* operator, which exchanges the states of two qubits:
+
+#+begin_src lisp
+  (defparameter +SWAP+ #2A((1 0 0 0)
+  			 (0 0 1 0)
+  			 (0 1 0 0)
+  			 (0 0 0 1)))
+#+end_src
+
+#+RESULTS:
+: +SWAP+
+
+Using the fact that permutations can be decomposed into product of adjacent transpositions, we
+can form a list of cons cells with the required transpositions as follows:
+
+#+begin_src lisp
+  (defun perm-as-trans (permutation)
+    (let ((transpositions nil))
+      (dotimes (natural (length permutation) (nreverse transpositions))
+        (let ((permuted (elt permutation natural)))
+  	(loop :while (< permuted natural) :do
+  	  (setf permuted (elt permutation permuted)))
+  	(when (> permuted natural)
+  	  (push (cons natural permuted) transpositions))))))
+#+end_src
+
+#+RESULTS:
+: PERM-AS-TRANS
+
+Please note that in the above code the =permutation= indicates the index on the rearranged
+array, not the rearranged array itself. This is in correspondence with Cauchy's two line
+notation. The code above is tricky at times. Here is what it is doing:
+
+1. We loop through the =natural= order of the set
+2. For each target =permuted= index in =permutation=, if the index is larger than in the =natural=
+   case we directly add a transposition. If it is smaller, we trace back the swaps needed to place
+   index. This will eventually lead to a cycle (=permuted= equal =natural=) or a new transposition
+   (=permuted= greater than =natural=)
+3. The original code in the tutorial used a =cond= clause to avoid pushing to =transpositions=
+   when no swap was needed. I streamlined this with a =when=
