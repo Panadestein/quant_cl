@@ -52,7 +52,7 @@ The propagation of the quantum system is then implemented using linear algebra o
 
 #+begin_src lisp :tangle yes
   (defun apply-operator (unitary-operator ket)
-    (let* ((oper-size (array-dimension mat 0))
+    (let* ((oper-size (array-dimension unitary-operator 0))
   	 (new-ket (make-array oper-size :initial-element 0.0d0)))
       (dotimes (i oper-size)
         (let ((element 0.0d0))
@@ -114,7 +114,7 @@ If we have \(U = \text{Uniform}(0, 1)\) then we can leverage this to sample:
 
 We can implement the above equations as follows:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun sample (state)
     (let ((u (random 1.0d0)))
       (dotimes (i (length state))
@@ -127,7 +127,7 @@ We can implement the above equations as follows:
 
 The collapse of the wave function implies this realization:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun collapse (state qubit)
     (fill state 0.0d0)
     (setf (aref state qubit) 1.0d0))
@@ -138,7 +138,7 @@ The collapse of the wave function implies this realization:
 
 Now we can proceed to define some gates. Let's start with the identity:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defparameter +I+ #2A((1 0)
   		      (0 1))
   	      "The identity gate.")
@@ -149,13 +149,13 @@ Now we can proceed to define some gates. Let's start with the identity:
 
 Then a function to apply a generic gate:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun apply-gate (state unitary-operator qubits)
     (assert (= (length qubits)
   	     (dimension-qubits (array-dimension unitary-operator 0))))
     (if (= (length qubits) 1)
-        (%apply-singleq-gate state unitary-operator (first qubits))
-        (%apply-multiq-gate state unitary-operator qubits)))
+        (apply-singleq-gate state unitary-operator (first qubits))
+        (apply-multiq-gate state unitary-operator qubits)))
 #+end_src
 
 #+RESULTS:
@@ -163,11 +163,11 @@ Then a function to apply a generic gate:
 
 We need an implementation of the Kronecker product for generating multi-qubit gates:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun kronecker-product (unitary-A unitary-B)
     (destructuring-bind (m n) (array-dimensions unitary-A)
       (destructuring-bind (p q) (array-dimensions unitary-B)
-        (let ((kron-dot-unitary (make-array (list (* m n) (* p q)))))
+        (let ((kron-dot-unitary (make-array (list (* m p) (* n q)))))
   	(dotimes (i m kron-dot-unitary)
   	  (dotimes (j n)
   	    (let ((unitary-A-ij (aref unitary-A i j))
@@ -193,7 +193,7 @@ the following lift operator:
 
 where the first \(ldots\) covers \(n - i - 3\) factors and the second one \(i - 1\) factors.
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun kronecker-expt (unitary n)
     (cond
       ((< n 1) #2A((1)))
@@ -206,10 +206,10 @@ where the first \(ldots\) covers \(n - i - 3\) factors and the second one \(i - 
 
 With the above definition, the lift operator can be implemented as:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun lift (unitary i n)
     (let ((left-factors (kronecker-expt +I+ (- n i (dimension-qubits
-  						  (array-dimensions unitary 0)))))
+  						  (array-dimension unitary 0)))))
   	(right-factors (kronecker-expt +I+ i)))
       (kronecker-product left-factors
   		       (kronecker-product unitary right-factors))))
@@ -228,7 +228,7 @@ qubit gates' actions are a bit trickier to handle. The idea is to generate a per
 
 We then define the *SWAP* operator, which exchanges the states of two qubits:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defparameter +SWAP+ #2A((1 0 0 0)
   			 (0 0 1 0)
   			 (0 1 0 0)
@@ -241,7 +241,7 @@ We then define the *SWAP* operator, which exchanges the states of two qubits:
 Using the fact that permutations can be decomposed into product of adjacent transpositions, we
 can form a list of cons cells with the required transpositions as follows:
 
-#+begin_src lisp
+#+begin_src lisp :tangle yes
   (defun perm-as-trans (permutation)
     (let ((transpositions nil))
       (dotimes (natural (length permutation) (nreverse transpositions))
@@ -266,3 +266,261 @@ notation. The code above is tricky at times. Here is what it is doing:
    (=permuted= greater than =natural=)
 3. The original code in the tutorial used a =cond= clause to avoid pushing to =transpositions=
    when no swap was needed. I streamlined this with a =when=
+
+The next step is to cast the above transpositions as transpositions of adjacent qubits,
+this time using a nice lambda:
+
+#+begin_src lisp :tangle yes
+  (defun trans-as-adjacent (transpositions)
+    (mapcan (lambda (trans)
+              (let ((start (car trans))
+                    (end (cdr trans)))
+                (if (= end (1+ start))
+                    (list start)
+                    (nconc (loop :for i :from start :below (1- end) :collect i)
+  			 (loop :for i :from (1- end) :downto start :collect i)))))
+            transpositions))
+#+end_src
+
+#+RESULTS:
+: TRANS-AS-ADJACENT
+
+Given all this procedures, we can write the core of the interpreter, which uses transpositions
+to implement two qubit gates:
+
+#+begin_src lisp :tangle yes
+  (defun apply-singleq-gate (state unitary q)
+    (apply-operator (lift unitary q (dimension-qubits (length state)))
+                    state))
+
+  (defun apply-multiq-gate (state unitary qubits)
+    (let ((n (dimension-qubits (length state))))
+      (labels ((trans-to-op (trans)
+                 (reduce #'compose-operator trans
+  		       :key (lambda (i) (lift +swap+ i n)))))
+        (let* ((unitary-init (lift unitary 0 n))
+               (perm (append (reverse qubits)
+  			   (remove-if (lambda (i) (member i qubits))
+                                        (loop for i :below n :collect i))))
+               (trans (trans-as-adjacent (perm-as-trans perm)))
+               (to->from (trans-to-op trans))
+               (from->to (trans-to-op (reverse trans)))
+               (unitary-conform (compose-operator to->from
+  						(compose-operator unitary-init
+  								  from->to))))
+          (apply-operator unitary-conform state)))))
+#+end_src
+
+#+RESULTS:
+: APPLY-MULTIQ-GATE
+
+We can put then everything together in the driving loop of the interpreter:
+
+#+begin_src lisp :tangle yes
+  (defun clq (qprog machine)
+    (loop :for (instruction . parameters) :in qprog
+          :do (ecase instruction
+                ((GATE)
+                 (destructuring-bind (gate &rest qubits) parameters
+                   (apply-gate (machine-quantum-state machine) gate qubits)))
+                ((MEASURE)
+                 (observe machine)))
+          :finally (return machine)))
+#+end_src
+
+#+RESULTS:
+: CLQ
+
+* Example applications
+
+** Bell states
+
+Some additional gates:
+
+#+begin_src lisp :tangle yes
+  (defparameter +H+
+    (make-array '(2 2)
+  	      :initial-contents
+  	      (let ((s (/ (sqrt 2))))
+                  (list (list s s)
+  		      (list s (- s))))))
+
+  (defparameter +CNOT+ #2A((1 0 0 0)
+                           (0 1 0 0)
+                           (0 0 0 1)
+                           (0 0 1 0)))
+#+end_src
+
+#+RESULTS:
+: +CNOT+
+
+And now this nice macro:
+
+#+begin_src lisp :tangle yes
+  (defun bell-state (p q)
+    `((GATE ,+H+ ,p)
+      (GATE ,+CNOT+ ,p ,q)))
+#+end_src
+
+#+RESULTS:
+: BELL-STATE
+
+Then the climax:
+
+#+begin_src lisp :tangle yes
+  (clq (bell-state 0 1)
+       (make-machine :quantum-state (make-quantum-state 2)
+                     :measurement-register 0))
+#+end_src
+
+#+RESULTS:
+: #S(MACHINE
+:    :QUANTUM-STATE #(0.7071067690849304d0 0.0d0 0.0d0 0.7071067690849304d0)
+:    :MEASUREMENT-REGISTER 0)
+
+
+** Quantum Fourier transform
+
+First we add the phase \(R_k\) gate:
+
+#+begin_src lisp :tangle yes
+  (defun cphase (angle)
+    (make-array '(4 4) :initial-contents `((1 0 0 0)
+                                           (0 1 0 0)
+                                           (0 0 1 0)
+                                           (0 0 0 ,(cis angle)))))
+
+  (defun cphase-reorder (angle)
+    (make-array '(4 4) :initial-contents `((1 0 0 0)
+                                           (0 ,(cis angle) 0 0)
+                                           (0 0 1 0)
+                                           (0 0 0 1))))
+#+end_src
+
+#+RESULTS:
+: CPHASE-REORDER
+
+And then the nice recursive procedure computing the QFT:
+
+#+begin_src lisp :tangle yes
+  (defun qft (qubits)
+    (labels ((bit-reversal (qubits)
+               (let ((n (length qubits)))
+                 (if (< n 2)
+                     nil
+                     (loop :repeat (floor n 2)
+                           :for qs :in qubits
+                           :for qe :in (reverse qubits)
+                           :collect `(GATE ,+swap+ ,qs ,qe)))))
+             (%qft (qubits)
+               (destructuring-bind (q . qs) qubits
+                 (if (null qs)
+                     (list `(GATE ,+H+ ,q))
+                     (let ((cR (loop :with n := (1+ (length qs))
+                                     :for i :from 1
+                                     :for qi :in qs
+                                     :for angle := (/ pi (expt 2 (- n i)))
+                                     :collect `(GATE ,(cphase angle) ,q ,qi))))
+                       (append
+                        (qft qs)
+                        cR
+                        (list `(GATE ,+H+ ,q))))))))
+      (append (%qft qubits) (bit-reversal qubits))))
+#+end_src
+
+Test what the heck that is doing:
+
+#+begin_src lisp :tangle yes
+  (qft '(0 1 2))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+((GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
+ (GATE
+  #2A((1 0 0 0) (0 1 0 0) (0 0 1 0) (0 0 0 #C(6.123233995736766d-17 1.0d0))) 1
+  2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
+ (GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 1 2)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 0.7071067811865475d0)))
+  0 1)
+ (GATE
+  #2A((1 0 0 0) (0 1 0 0) (0 0 1 0) (0 0 0 #C(6.123233995736766d-17 1.0d0))) 0
+  2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0)
+ (GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 0 2))
+#+end_example
+
+#+begin_src lisp :tangle yes
+  (clq (qft '(0 1 2))
+       (make-machine :quantum-state (make-quantum-state 3)
+                     :measurement-register 0))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+#S(MACHINE
+   :QUANTUM-STATE #(#C(0.3535533724408484d0 0.0d0)
+                    #C(0.3535533724408484d0 0.0d0)
+                    #C(0.3535533724408484d0 0.0d0)
+                    #C(0.3535533724408484d0 0.0d0)
+                    #C(0.3535533724408484d0 0.0d0)
+                    #C(0.3535533724408484d0 0.0d0)
+                    #C(0.3535533724408484d0 0.0d0)
+                    #C(0.3535533724408484d0 0.0d0))
+   :MEASUREMENT-REGISTER 0)
+#+end_example
+
+** Quantum subroutine of Shor's algorithm
+
+Let's define the period finding circuit of 15 with a "random" choice of \(a=11\):
+
+#+begin_src lisp :tangle yes
+  (defun shor-fifteen ()
+    `((GATE ,+H+ 0)
+      (GATE ,+H+ 1)
+      (GATE ,+H+ 2)
+      (GATE ,+CNOT+ 2 3)
+      (GATE ,+CNOT+ 2 4)
+      (GATE ,+H+ 1)
+      (GATE ,(cphase-reorder (/ pi 2)) 0 1)
+      (GATE ,+H+ 0)
+      (GATE ,(cphase (/ pi 4)) 1 2)
+      (GATE ,(cphase (/ pi 2)) 0 2)
+      (GATE ,+H+ 2)))
+#+end_src
+
+#+RESULTS:
+: SHOR-FIFTEEN
+
+Hopefully we find a period of 4 somewhere:
+
+#+begin_src lisp :tangle yes
+  (clq (shor-fifteen)
+       (make-machine :quantum-state (make-quantum-state 5)
+                     :measurement-register 0))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+#S(MACHINE
+   :QUANTUM-STATE #(#C(0.49999994865718905d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.49999994865718905d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.49999994865718905d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(-0.49999994865718905d0 0.0d0) #C(0.0d0 0.0d0)
+                    #C(0.0d0 0.0d0) #C(0.0d0 0.0d0))
+   :MEASUREMENT-REGISTER 0)
+#+end_example
+
