@@ -43,8 +43,8 @@
 (defun sample (state)
   (let ((u (random 1.0d0)))
     (dotimes (i (length state))
-      (decf r (expt (abs (aref state i)) 2))
-      (when (minusp r) (return i)))))
+      (decf u (expt (abs (aref state i)) 2))
+      (when (minusp u) (return i)))))
 
 (defun collapse (state qubit)
   (fill state 0.0d0)
@@ -204,21 +204,4 @@
 
 (clq (qft '(0 1 2))
      (make-machine :quantum-state (make-quantum-state 3)
-                   :measurement-register 0))
-
-(defun shor-fifteen ()
-  `((GATE ,+H+ 0)
-    (GATE ,+H+ 1)
-    (GATE ,+H+ 2)
-    (GATE ,+CNOT+ 2 3)
-    (GATE ,+CNOT+ 2 4)
-    (GATE ,+H+ 1)
-    (GATE ,(cphase-reorder (/ pi 2)) 0 1)
-    (GATE ,+H+ 0)
-    (GATE ,(cphase (/ pi 4)) 1 2)
-    (GATE ,(cphase (/ pi 2)) 0 2)
-    (GATE ,+H+ 2)))
-
-(clq (shor-fifteen)
-     (make-machine :quantum-state (make-quantum-state 5)
                    :measurement-register 0))
