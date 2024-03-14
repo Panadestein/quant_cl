@@ -478,7 +478,7 @@ Test what the heck that is doing:
    :MEASUREMENT-REGISTER 0)
 #+end_example
 
-** COMMENT Quantum subroutine of Shor's algorithm
+** Quantum subroutine of Shor's algorithm
 
 Let's define the period finding circuit of 15 with a "random" choice of \(a=11\):
 
@@ -509,6 +509,7 @@ Hopefully we find a period of 4 somewhere:
                      :measurement-register 0))
 #+end_src
 
+
 #+RESULTS:
 : #S(MACHINE
 :    :QUANTUM-STATE #(0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
@@ -533,5 +534,3 @@ Hopefully we find a period of 4 somewhere:
 
 #+RESULTS:
 | 256 | 0 | 0 | 0 | 288 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 240 | 0 | 0 | 0 | 240 | 0 | 0 | 0 |
-
-
