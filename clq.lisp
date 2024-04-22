@@ -156,6 +156,9 @@
                          (0 0 0 1)
                          (0 0 1 0)))
 
+(defparameter +X+ #2A((0 1)
+		      (1 0)))
+
 (defun bell-state (p q)
   `((GATE ,+H+ ,p)
     (GATE ,+CNOT+ ,p ,q)))
@@ -234,4 +237,108 @@
                                        :measurement-register 0)))))
 	(dotimes (j hilbert)
 	  (when (> (aref state j) 0) (incf (aref results j))))))))
-(counts 1024 5)
+(counts 5 5)
+
+(defun quantum-modular-exponentiation (exponent n-control)
+  (let ((me-gates nil))
+    (loop :repeat (expt 2 exponent) :do
+      (push `(GATE ,+SWAP+ ,(+ n-control 1) ,(+ n-control 3)) me-gates)
+      (push `(GATE ,+SWAP+ ,(+ n-control 0) ,(+ n-control 2)) me-gates))
+    (nreverse me-gates)))
+(quantum-modular-exponentiation 1 9)
+
+(defun qft-dagger (n)
+  (let ((gates nil))
+    ;; Perform bit reversal by swapping qubits.
+    (loop :for q :from 0 :below (floor n 2) :do
+          (push `(GATE ,+swap+ ,q ,(- n q 1)) gates))
+    ;; Apply the controlled phase gates and Hadamard gates.
+    (loop :for j :from 0 :below n :do
+          (progn
+            (loop :for m :from 0 :below j :do
+                  (push `(GATE ,(cphase (- (/ pi (expt 2 (1+ (- j m)))))) ,m ,j) gates))
+            (push `(GATE ,+H+ ,j) gates)))
+    (nreverse gates)))
+(qft-dagger 3)
+
+(defun shor-fifteen-full (n m)
+  (let ((circuit nil))
+    ;;  Initialize control qubits
+    (loop :for q-control :bellow m :do
+      (push `(GATE ,+H+ ,q-control) circuit))
+    ;; Populate work register with state |1>
+    (push `(GATE ,+X+ ,(+ m 1)) circuit)
+    ;; Modular exponentiation
+    ;; Inverse quantum Fourier transform
+    (push (qft-dagger m) circuit)
+    ;;  Correct the order of execution after pushing
+    (nreverse circuit)))
+
+(defun make-toffoli-gate ()
+  (let ((matrix (make-array '(8 8)
+			    :element-type 'double-float
+			    :initial-element 0.0d0)))
+    ;; Setting diagonal elements to 1 for no-op cases
+    (dotimes (i 8)
+      (setf (aref matrix i i) 1d0))
+    ;; Swap the elements for the |110> and |111> states
+    (setf (aref matrix 6 6) 0.0d0)
+    (setf (aref matrix 6 7) 1.0d0)
+    (setf (aref matrix 7 7) 0.0d0)
+    (setf (aref matrix 7 6) 1.0d0)
+    matrix))
+
+;; To use this function
+(defparameter +TOFFOLI+ (make-toffoli-gate))
+
+(defun shor-21 (r-control r-work)
+  (let ((circuit nil)
+	(n-qubits (+ r-control r-work)))
+    ;;  Initialize control qubits
+    (loop :for c :below r-control :do
+      (push `(GATE ,+H+ ,c) circuit))
+    ;; Populate work register with state |1>
+    (push `(GATE ,+X+ ,r-control) circuit)
+    ;; Compiled modular exponentiation U^1
+    (push `(GATE ,+CNOT+ ,(- r-control 1) ,(- n-qubits 1)) circuit)
+    ;; Compiled modular exponentiation U^2
+    (push `(GATE ,+CNOT+ ,(- r-control 2) ,(- n-qubits 1)) circuit)
+    (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+    (push `(GATE ,+TOFFOLI+ ,(- r-control 2) ,(- n-qubits 2) ,(- n-qubits 1)) circuit)
+    (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+    ;; Compiled modular exponentiation U^4
+    (push `(GATE ,+X+ ,(- n-qubits 1)) circuit)
+    (push `(GATE ,+TOFFOLI+ ,0 ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+    (push `(GATE ,+X+ ,(- n-qubits 1)) circuit)
+    (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+    (push `(GATE ,+TOFFOLI+ ,0 ,(- n-qubits 2) ,(- n-qubits 1)) circuit)
+    (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+    ;; Inverse quantum Fourier transform
+    (setf circuit (nconc (nreverse circuit) (qft-dagger r-control)))
+    ;;  Correct the order of execution after pushing
+    circuit))
+(shor-21 3 2)
+
+(clq (shor-21 3 2)
+     (make-machine :quantum-state (make-quantum-state 5)
+                   :measurement-register 0))
+
+(defun sample-final-state (state)
+  (let ((rnd (random 1.0d0))
+        (cumulative-prob 0.0d0))
+    (dotimes (i (length state))
+      (setf cumulative-prob (+ cumulative-prob (expt (abs (aref state i)) 2)))
+      (when (>= cumulative-prob rnd)
+        (return i)))))
+
+(defun counts (realizations qubits)
+  (let* ((hilbert (expt 2 qubits))
+         (results (make-array hilbert :initial-element 0)))
+    (dotimes (i realizations results)
+      (let ((machine (clq (shor-21 3 2)
+                          (make-machine :quantum-state (make-quantum-state qubits)
+                                        :measurement-register 0))))
+        (let ((state (machine-quantum-state machine)))
+          (let ((outcome (sample-final-state state)))
+            (incf (aref results outcome))))))))
+(counts 100 5)

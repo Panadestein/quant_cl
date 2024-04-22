@@ -226,7 +226,7 @@ qubit gates' actions are a bit trickier to handle. The idea is to generate a per
  \Pi^{-1}\text{lift}(g, 0, n)\Pi
 \end{equation}
 
-We then define the *SWAP* operator, which exchanges the states of two qubits:
+We then define the *SWAP* gate (or Fredkin gate), which exchanges the states of two qubits:
 
 #+begin_src lisp :tangle yes
   (defparameter +SWAP+ #2A((1 0 0 0)
@@ -349,10 +349,13 @@ Some additional gates:
                            (0 1 0 0)
                            (0 0 0 1)
                            (0 0 1 0)))
+
+  (defparameter +X+ #2A((0 1)
+  		      (1 0)))
 #+end_src
 
 #+RESULTS:
-: +CNOT+
+: +X+
 
 And now this nice macro:
 
@@ -529,8 +532,291 @@ Hopefully we find a period of 4 somewhere:
                                          :measurement-register 0)))))
   	(dotimes (j hilbert)
   	  (when (> (aref state j) 0) (incf (aref results j))))))))
-  (counts 1024 5)
+  (counts 5 5)
 #+end_src
 
 #+RESULTS:
-| 256 | 0 | 0 | 0 | 288 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 240 | 0 | 0 | 0 | 240 | 0 | 0 | 0 |
+| 1 | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 | 0 |
+
+** Another version of Shor's subroutine for 15 (incomplete)
+
+This is the full circuit for \(N=15\) and base \(a=11\), taken from this reference [[https://arxiv.org/abs/2306.09122][2306.09122]]. The circuit will have \(m=9\)
+qubits in the control register and \(n=4\) qubits in the work register (length of 15's binary representation). We will manually
+build the modular exponentiation gates of the quantum phase estimation part, and define the inverse QFT:
+
+#+begin_src lisp :tangle yes
+  (defun quantum-modular-exponentiation (exponent n-control)
+    (let ((me-gates nil))
+      (loop :repeat (expt 2 exponent) :do
+        (push `(GATE ,+SWAP+ ,(+ n-control 1) ,(+ n-control 3)) me-gates)
+        (push `(GATE ,+SWAP+ ,(+ n-control 0) ,(+ n-control 2)) me-gates))
+      (nreverse me-gates)))
+  (quantum-modular-exponentiation 1 9)
+#+end_src
+
+#+RESULTS:
+| 1.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 |
+
+#+begin_src lisp :tangle yes
+  (defun qft-dagger (n)
+    (let ((gates nil))
+      ;; Perform bit reversal by swapping qubits.
+      (loop :for q :from 0 :below (floor n 2) :do
+            (push `(GATE ,+swap+ ,q ,(- n q 1)) gates))
+      ;; Apply the controlled phase gates and Hadamard gates.
+      (loop :for j :from 0 :below n :do
+            (progn
+              (loop :for m :from 0 :below j :do
+                    (push `(GATE ,(cphase (- (/ pi (expt 2 (1+ (- j m)))))) ,m ,j) gates))
+              (push `(GATE ,+H+ ,j) gates)))
+      (nreverse gates)))
+  (qft-dagger 3)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+((GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 0 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
+  0 1)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
+  0 2)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
+  1 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2))
+#+end_example
+
+The full circuit is then:
+
+#+begin_src lisp :tangle yes
+  (defun shor-fifteen-full (n m)
+    (let ((circuit nil))
+      ;;  Initialize control qubits
+      (loop :for q-control :bellow m :do
+        (push `(GATE ,+H+ ,q-control) circuit))
+      ;; Populate work register with state |1>
+      (push `(GATE ,+X+ ,(+ m 1)) circuit)
+      ;; Modular exponentiation
+      ;; Inverse quantum Fourier transform
+      (push (qft-dagger m) circuit)
+      ;;  Correct the order of execution after pushing
+      (nreverse circuit)))
+#+end_src
+
+#+RESULTS:
+: SHOR-FIFTEEN-FULL
+
+The challenge in this implementation is the factorization of the controlled U gates, which is quite complicated
+in an interpreter like =clq=.
+
+** Factorizing 21 with Shor's algorithm
+
+We will follow for this example the circuit proposed in [[https://arxiv.org/pdf/2103.13855.pdf][2103.13855]]. This is a much more simpler circuit than the one
+attempted in the previous section, it is in fact a compiled version of the full one. We will use the base \(a=4\).
+We start by defining the Toffoli gate (controlled-controlled-not):
+
+#+begin_src lisp :tangle yes
+  (defun make-toffoli-gate ()
+    (let ((matrix (make-array '(8 8)
+  			    :element-type 'double-float
+  			    :initial-element 0.0d0)))
+      ;; Setting diagonal elements to 1 for no-op cases
+      (dotimes (i 8)
+        (setf (aref matrix i i) 1d0))
+      ;; Swap the elements for the |110> and |111> states
+      (setf (aref matrix 6 6) 0.0d0)
+      (setf (aref matrix 6 7) 1.0d0)
+      (setf (aref matrix 7 7) 0.0d0)
+      (setf (aref matrix 7 6) 1.0d0)
+      matrix))
+
+  ;; To use this function
+  (defparameter +TOFFOLI+ (make-toffoli-gate))
+#+end_src
+
+#+RESULTS:
+: +TOFFOLI+
+
+The important part here is that after compilation, the quantum subroutine of the circuit evaluates \(\log_4 [4^x \% 21]\).
+By using a suitable mapping, we are left with 3 qubits in the control register and 2 in the work register. The controlled
+gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CNOTs and TOFFOLIs.
+
+#+begin_src lisp :tangle yes
+  (defun shor-21 (r-control r-work)
+    (let ((circuit nil)
+  	(n-qubits (+ r-control r-work)))
+      ;;  Initialize control qubits
+      (loop :for c :below r-control :do
+        (push `(GATE ,+H+ ,c) circuit))
+      ;; Populate work register with state |1>
+      (push `(GATE ,+X+ ,r-control) circuit)
+      ;; Compiled modular exponentiation U^1
+      (push `(GATE ,+CNOT+ ,(- r-control 1) ,(- n-qubits 1)) circuit)
+      ;; Compiled modular exponentiation U^2
+      (push `(GATE ,+CNOT+ ,(- r-control 2) ,(- n-qubits 1)) circuit)
+      (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+      (push `(GATE ,+TOFFOLI+ ,(- r-control 2) ,(- n-qubits 2) ,(- n-qubits 1)) circuit)
+      (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+      ;; Compiled modular exponentiation U^4
+      (push `(GATE ,+X+ ,(- n-qubits 1)) circuit)
+      (push `(GATE ,+TOFFOLI+ ,0 ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+      (push `(GATE ,+X+ ,(- n-qubits 1)) circuit)
+      (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+      (push `(GATE ,+TOFFOLI+ ,0 ,(- n-qubits 2) ,(- n-qubits 1)) circuit)
+      (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
+      ;; Inverse quantum Fourier transform
+      (setf circuit (nconc (nreverse circuit) (qft-dagger r-control)))
+      ;;  Correct the order of execution after pushing
+      circuit))
+  (shor-21 3 2)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+((GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
+ (GATE #2A((0 1) (1 0)) 3)
+ (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 2 4)
+ (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 1 4)
+ (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 4 3)
+ (GATE
+  #2A((1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0))
+  1 3 4)
+ (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 4 3)
+ (GATE #2A((0 1) (1 0)) 4)
+ (GATE
+  #2A((1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0))
+  0 4 3)
+ (GATE #2A((0 1) (1 0)) 4)
+ (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 4 3)
+ (GATE
+  #2A((1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0)
+      (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0))
+  0 3 4)
+ (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 4 3)
+ (GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 0 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
+  0 1)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
+  0 2)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
+  1 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2))
+#+end_example
+
+#+begin_src lisp :tangle yes
+  (clq (shor-21 3 2)
+       (make-machine :quantum-state (make-quantum-state 5)
+                     :measurement-register 0))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+#S(MACHINE
+   :QUANTUM-STATE #(#C(0.12499998716429726d0 0.0d0)
+                    #C(0.1154849297052678d0 -0.047835424133625445d0)
+                    #C(0.088388338572106d0 -0.08838833857210598d0)
+                    #C(0.047835424133625445d0 -0.1154849297052678d0)
+                    #C(-0.12499998716429726d0 0.0d0)
+                    #C(-0.1154849297052678d0 0.047835424133625445d0)
+                    #C(-0.088388338572106d0 0.08838833857210598d0)
+                    #C(-0.047835424133625445d0 0.1154849297052678d0)
+                    #C(0.24999997432859453d0 0.0d0)
+                    #C(0.07716456303067182d0 0.1154849297052678d0)
+                    #C(0.036611648592191265d0 0.08838833857210598d0)
+                    #C(0.07716456303067185d0 -0.1154849297052678d0)
+                    #C(0.0d0 0.0d0)
+                    #C(0.1728354112979227d0 -0.1154849297052678d0)
+                    #C(0.21338832573640326d0 -0.08838833857210598d0)
+                    #C(0.17283541129792268d0 0.1154849297052678d0)
+                    #C(0.12499998716429726d0 0.0d0)
+                    #C(-0.088388338572106d0 0.088388338572106d0)
+                    #C(-0.12499998716429726d0 0.0d0)
+                    #C(0.088388338572106d0 -0.088388338572106d0)
+                    #C(0.12499998716429726d0 0.0d0)
+                    #C(-0.088388338572106d0 0.088388338572106d0)
+                    #C(-0.12499998716429726d0 0.0d0)
+                    #C(0.088388338572106d0 -0.088388338572106d0)
+                    #C(0.49999994865718905d0 0.0d0)
+                    #C(-0.10426115416383362d0 -0.15603784414374836d0)
+                    #C(0.0d0 0.0d0)
+                    #C(-0.21338832573640326d0 0.3193581979826416d0)
+                    #C(0.0d0 0.0d0)
+                    #C(0.031037856979451092d0 -0.02073883300046364d0)
+                    #C(0.0d0 0.0d0)
+                    #C(-0.21338832573640326d0 -0.14258152083842962d0))
+   :MEASUREMENT-REGISTER 0)
+#+end_example
+
+#+begin_src lisp :tangle yes
+  (defun sample-final-state (state)
+    (let ((rnd (random 1.0d0))
+          (cumulative-prob 0.0d0))
+      (dotimes (i (length state))
+        (setf cumulative-prob (+ cumulative-prob (expt (abs (aref state i)) 2)))
+        (when (>= cumulative-prob rnd)
+          (return i)))))
+
+  (defun counts (realizations qubits)
+    (let* ((hilbert (expt 2 qubits))
+           (results (make-array hilbert :initial-element 0)))
+      (dotimes (i realizations results)
+        (let ((machine (clq (shor-21 3 2)
+                            (make-machine :quantum-state (make-quantum-state qubits)
+                                          :measurement-register 0))))
+          (let ((state (machine-quantum-state machine)))
+            (let ((outcome (sample-final-state state)))
+              (incf (aref results outcome))))))))
+  (counts 100 5)
+#+end_src
+
+#+RESULTS:
+| 0 | 4 | 0 | 0 | 1 | 1 | 4 | 1 | 6 | 1 | 0 | 1 | 0 | 6 | 5 | 7 | 2 | 0 | 1 | 0 | 1 | 3 | 4 | 1 | 23 | 3 | 0 | 20 | 0 | 0 | 0 | 5 |
