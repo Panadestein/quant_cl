@@ -522,21 +522,22 @@ Hopefully we find a period of 4 somewhere:
 :    :MEASUREMENT-REGISTER 24)
 
 #+begin_src lisp :tangle yes
-  (defun counts (realizations qubits)
+  (defun counts (realizations qubits q-circuit &rest args)
     (let* ((hilbert (expt 2 qubits))
            (results (make-array hilbert :initial-element 0)))
       (dotimes (i realizations results)
         (let ((state (machine-quantum-state
-                      (clq (shor-fifteen)
+                      (clq (apply q-circuit args) 
                            (make-machine :quantum-state (make-quantum-state qubits)
                                          :measurement-register 0)))))
-  	(dotimes (j hilbert)
-  	  (when (> (aref state j) 0) (incf (aref results j))))))))
-  (counts 5 5)
+          (dotimes (j hilbert)
+            (when (> (aref state j) 0) (incf (aref results j))))))))
+
+  (counts 100 5 #'shor-fifteen)
 #+end_src
 
 #+RESULTS:
-| 1 | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 | 0 |
+| 24 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 23 | 0 | 0 | 0 | 22 | 0 | 0 | 0 |
 
 ** Another version of Shor's subroutine for 15 (incomplete)
 
@@ -560,43 +561,43 @@ build the modular exponentiation gates of the quantum phase estimation part, and
 #+begin_src lisp :tangle yes
   (defun qft-dagger (n)
     (let ((gates nil))
-      ;; Perform bit reversal by swapping qubits.
-      (loop :for q :from 0 :below (floor n 2) :do
-            (push `(GATE ,+swap+ ,q ,(- n q 1)) gates))
       ;; Apply the controlled phase gates and Hadamard gates.
       (loop :for j :from 0 :below n :do
             (progn
               (loop :for m :from 0 :below j :do
                     (push `(GATE ,(cphase (- (/ pi (expt 2 (1+ (- j m)))))) ,m ,j) gates))
               (push `(GATE ,+H+ ,j) gates)))
-      (nreverse gates)))
+      ;; Perform bit reversal by swapping qubits.
+      (loop :for q :from 0 :below (floor n 2) :do
+            (push `(GATE ,+swap+ ,q ,(- n q 1)) gates))
+      gates))
   (qft-dagger 3)
 #+end_src
 
 #+RESULTS:
 #+begin_example
 ((GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 0 2)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
-  0 1)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
-  0 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
  (GATE
   #2A((1 0 0 0)
       (0 1 0 0)
       (0 0 1 0)
       (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
   1 2)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2))
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
+  0 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
+  0 1)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0))
 #+end_example
 
 The full circuit is then:
@@ -661,8 +662,6 @@ gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CN
       ;;  Initialize control qubits
       (loop :for c :below r-control :do
         (push `(GATE ,+H+ ,c) circuit))
-      ;; Populate work register with state |1>
-      (push `(GATE ,+X+ ,r-control) circuit)
       ;; Compiled modular exponentiation U^1
       (push `(GATE ,+CNOT+ ,(- r-control 1) ,(- n-qubits 1)) circuit)
       ;; Compiled modular exponentiation U^2
@@ -679,8 +678,8 @@ gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CN
       (push `(GATE ,+CNOT+ ,(- n-qubits 1) ,(- n-qubits 2)) circuit)
       ;; Inverse quantum Fourier transform
       (setf circuit (nconc (nreverse circuit) (qft-dagger r-control)))
-      ;;  Correct the order of execution after pushing
-      circuit))
+      ;;  Add measurement
+      (nconc circuit `((MEASURE)))))
   (shor-21 3 2)
 #+end_src
 
@@ -689,7 +688,6 @@ gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CN
 ((GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0)
  (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
  (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
- (GATE #2A((0 1) (1 0)) 3)
  (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 2 4)
  (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 1 4)
  (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 4 3)
@@ -729,27 +727,27 @@ gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CN
   0 3 4)
  (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 4 3)
  (GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 0 2)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
-  0 1)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
-  0 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
  (GATE
   #2A((1 0 0 0)
       (0 1 0 0)
       (0 0 1 0)
       (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
   1 2)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2))
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
+  0 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
+  0 1)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0) (MEASURE))
 #+end_example
 
 #+begin_src lisp :tangle yes
@@ -759,64 +757,42 @@ gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CN
 #+end_src
 
 #+RESULTS:
-#+begin_example
-#S(MACHINE
-   :QUANTUM-STATE #(#C(0.12499998716429726d0 0.0d0)
-                    #C(0.1154849297052678d0 -0.047835424133625445d0)
-                    #C(0.088388338572106d0 -0.08838833857210598d0)
-                    #C(0.047835424133625445d0 -0.1154849297052678d0)
-                    #C(-0.12499998716429726d0 0.0d0)
-                    #C(-0.1154849297052678d0 0.047835424133625445d0)
-                    #C(-0.088388338572106d0 0.08838833857210598d0)
-                    #C(-0.047835424133625445d0 0.1154849297052678d0)
-                    #C(0.24999997432859453d0 0.0d0)
-                    #C(0.07716456303067182d0 0.1154849297052678d0)
-                    #C(0.036611648592191265d0 0.08838833857210598d0)
-                    #C(0.07716456303067185d0 -0.1154849297052678d0)
-                    #C(0.0d0 0.0d0)
-                    #C(0.1728354112979227d0 -0.1154849297052678d0)
-                    #C(0.21338832573640326d0 -0.08838833857210598d0)
-                    #C(0.17283541129792268d0 0.1154849297052678d0)
-                    #C(0.12499998716429726d0 0.0d0)
-                    #C(-0.088388338572106d0 0.088388338572106d0)
-                    #C(-0.12499998716429726d0 0.0d0)
-                    #C(0.088388338572106d0 -0.088388338572106d0)
-                    #C(0.12499998716429726d0 0.0d0)
-                    #C(-0.088388338572106d0 0.088388338572106d0)
-                    #C(-0.12499998716429726d0 0.0d0)
-                    #C(0.088388338572106d0 -0.088388338572106d0)
-                    #C(0.49999994865718905d0 0.0d0)
-                    #C(-0.10426115416383362d0 -0.15603784414374836d0)
-                    #C(0.0d0 0.0d0)
-                    #C(-0.21338832573640326d0 0.3193581979826416d0)
-                    #C(0.0d0 0.0d0)
-                    #C(0.031037856979451092d0 -0.02073883300046364d0)
-                    #C(0.0d0 0.0d0)
-                    #C(-0.21338832573640326d0 -0.14258152083842962d0))
-   :MEASUREMENT-REGISTER 0)
-#+end_example
+: #S(MACHINE
+:    :QUANTUM-STATE #(0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
+:                     0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
+:                     0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0
+:                     0.0d0 0.0d0)
+:    :MEASUREMENT-REGISTER 27)
 
 #+begin_src lisp :tangle yes
-  (defun sample-final-state (state)
-    (let ((rnd (random 1.0d0))
-          (cumulative-prob 0.0d0))
-      (dotimes (i (length state))
-        (setf cumulative-prob (+ cumulative-prob (expt (abs (aref state i)) 2)))
-        (when (>= cumulative-prob rnd)
-          (return i)))))
-
-  (defun counts (realizations qubits)
-    (let* ((hilbert (expt 2 qubits))
-           (results (make-array hilbert :initial-element 0)))
-      (dotimes (i realizations results)
-        (let ((machine (clq (shor-21 3 2)
-                            (make-machine :quantum-state (make-quantum-state qubits)
-                                          :measurement-register 0))))
-          (let ((state (machine-quantum-state machine)))
-            (let ((outcome (sample-final-state state)))
-              (incf (aref results outcome))))))))
-  (counts 100 5)
+  (counts 100 5 #'shor-21 3 2)
 #+end_src
 
 #+RESULTS:
-| 0 | 4 | 0 | 0 | 1 | 1 | 4 | 1 | 6 | 1 | 0 | 1 | 0 | 6 | 5 | 7 | 2 | 0 | 1 | 0 | 1 | 3 | 4 | 1 | 23 | 3 | 0 | 20 | 0 | 0 | 0 | 5 |
+| 14 | 5 | 1 | 4 | 1 | 3 | 6 | 7 | 4 | 0 | 0 | 3 | 0 | 5 | 8 | 0 | 11 | 0 | 3 | 2 | 0 | 0 | 10 | 13 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+The next procedure accumulates the counts of the 3-bit prefix string that represent the control register. This amounts to computing the marginal
+probabilities:
+
+#+begin_src lisp :tangle yes
+  (defun counts-control (cnt)
+    (let ((counts-prefix
+  	  (coerce 
+  	   (loop :for i :from 0 :below (length cnt) :by 4
+  		 :collecting (reduce '+ (subseq cnt i (min (+ i 4) (length cnt)))))
+  	   'vector)))
+      counts-prefix))
+#+end_src
+
+#+RESULTS:
+: COUNTS-CONTROL
+
+The dominant experimental entries are =000=, =011=, =101=, but only the last two are relevant. Since we use lexicographic order,
+they are the 0, 3 and 5 elements respectively.
+
+#+begin_src lisp :tangle yes
+  (counts-control (counts 1000 5 #'shor-21 3 2))
+#+end_src
+
+#+RESULTS:
+| 203 | 195 | 131 | 131 | 181 | 159 | 0 | 0 |
