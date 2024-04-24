@@ -117,21 +117,40 @@
   (apply-operator (lift unitary q (dimension-qubits (length state)))
                   state))
 
+;; Not what you think see bullets above!
+;; This will confuse you time and again if you don't remember
+;; that the permutation refers to the index of the value in
+;; the new arrangement, not the actual value!
+;; Do not use this function!
+(defun generate-permutation (applied-qubits n-qubits)
+  (let ((order (make-array n-qubits :initial-element -1))
+	(non-visited (loop :for i
+			   :from (length applied-qubits)
+			     :below n-qubits
+			   :collect i)))
+    (loop :for qubit :in applied-qubits
+	  :for index :upfrom 0
+	  :do (setf (aref order qubit) index))
+    (loop :for i :from 0 :below n-qubits
+          :when (= (aref order i) -1)
+	    :do (setf (aref order i) (pop non-visited)))
+    order))
+
 (defun apply-multiq-gate (state unitary qubits)
   (let ((n (dimension-qubits (length state))))
     (labels ((trans-to-op (trans)
                (reduce #'compose-operator trans
-		       :key (lambda (i) (lift +swap+ i n)))))
+  		       :key (lambda (i) (lift +swap+ i n)))))
       (let* ((unitary-init (lift unitary 0 n))
              (perm (append (reverse qubits)
-			   (remove-if (lambda (i) (member i qubits))
+  			   (remove-if (lambda (i) (member i qubits))
                                       (loop for i :below n :collect i))))
              (trans (trans-as-adjacent (perm-as-trans perm)))
              (to->from (trans-to-op trans))
              (from->to (trans-to-op (reverse trans)))
              (unitary-conform (compose-operator to->from
-						(compose-operator unitary-init
-								  from->to))))
+  						(compose-operator unitary-init
+  								  from->to))))
         (apply-operator unitary-conform state)))))
 
 (defun clq (qprog machine)
@@ -209,17 +228,28 @@
      (make-machine :quantum-state (make-quantum-state 3)
                    :measurement-register 0))
 
+(defun qft-dagger (n)
+  (let ((gates nil))
+    ;; Apply the controlled phase gates and Hadamard gates.
+    (loop :for j :from 0 :below n :do
+      (progn
+        (loop :for m :from 0 :below j :do
+          (push `(GATE ,(cphase (- (/ pi (expt 2 (- j m))))) ,m ,j) gates))
+        (push `(GATE ,+H+ ,j) gates)))
+    gates))
+(qft-dagger 3)
+
 (defun shor-fifteen ()
-  `((GATE ,+H+ 0)
-    (GATE ,+H+ 1)
-    (GATE ,+H+ 2)
-    (GATE ,+CNOT+ 2 3)
-    (GATE ,+CNOT+ 2 4)
-    (GATE ,+H+ 1)
-    (GATE ,(cphase-reorder (/ pi 2)) 0 1)
-    (GATE ,+H+ 0)
-    (GATE ,(cphase (/ pi 4)) 1 2)
-    (GATE ,(cphase (/ pi 2)) 0 2)
+  `((GATE ,+H+ 2)
+    (GATE ,+H+ 3)
+    (GATE ,+H+ 4)
+    (GATE ,+CNOT+ 2 1)
+    (GATE ,+CNOT+ 2 0)
+    (GATE ,+H+ 3)
+    (GATE ,(cphase (/ pi 2)) 3 4)
+    (GATE ,+H+ 4)
+    (GATE ,(cphase (/ pi 4)) 3 2)
+    (GATE ,(cphase (/ pi 2)) 4 2)
     (GATE ,+H+ 2)
     (MEASURE)))
 
@@ -238,7 +268,15 @@
         (dotimes (j hilbert)
           (when (> (aref state j) 0) (incf (aref results j))))))))
 
-(counts 100 5 #'shor-fifteen)
+(defun counts-control (cnt)
+  (let ((counts-prefix
+	  (coerce 
+	   (loop :for i :from 0 :below (length cnt) :by 4
+		 :collecting (reduce '+ (subseq cnt i (min (+ i 4) (length cnt)))))
+	   'vector)))
+    counts-prefix))
+
+(counts-control (counts 1024 5 #'shor-fifteen))
 
 (defun quantum-modular-exponentiation (exponent n-control)
   (let ((me-gates nil))
@@ -247,20 +285,6 @@
       (push `(GATE ,+SWAP+ ,(+ n-control 0) ,(+ n-control 2)) me-gates))
     (nreverse me-gates)))
 (quantum-modular-exponentiation 1 9)
-
-(defun qft-dagger (n)
-  (let ((gates nil))
-    ;; Apply the controlled phase gates and Hadamard gates.
-    (loop :for j :from 0 :below n :do
-          (progn
-            (loop :for m :from 0 :below j :do
-                  (push `(GATE ,(cphase (- (/ pi (expt 2 (1+ (- j m)))))) ,m ,j) gates))
-            (push `(GATE ,+H+ ,j) gates)))
-    ;; Perform bit reversal by swapping qubits.
-    (loop :for q :from 0 :below (floor n 2) :do
-          (push `(GATE ,+swap+ ,q ,(- n q 1)) gates))
-    gates))
-(qft-dagger 3)
 
 (defun shor-fifteen-full (n m)
   (let ((circuit nil))
@@ -322,14 +346,6 @@
      (make-machine :quantum-state (make-quantum-state 5)
                    :measurement-register 0))
 
-(counts 100 5 #'shor-21 3 2)
+(counts 1024 5 #'shor-21 3 2)
 
-(defun counts-control (cnt)
-  (let ((counts-prefix
-	  (coerce 
-	   (loop :for i :from 0 :below (length cnt) :by 4
-		 :collecting (reduce '+ (subseq cnt i (min (+ i 4) (length cnt)))))
-	   'vector)))
-    counts-prefix))
-
-(counts-control (counts 1000 5 #'shor-21 3 2))
+(counts-control (counts 100 5 #'shor-21 3 2))

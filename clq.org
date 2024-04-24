@@ -293,21 +293,40 @@ to implement two qubit gates:
     (apply-operator (lift unitary q (dimension-qubits (length state)))
                     state))
 
+  ;; Not what you think see bullets above!
+  ;; This will confuse you time and again if you don't remember
+  ;; that the permutation refers to the index of the value in
+  ;; the new arrangement, not the actual value!
+  ;; Do not use this function!
+  (defun generate-permutation (applied-qubits n-qubits)
+    (let ((order (make-array n-qubits :initial-element -1))
+  	(non-visited (loop :for i
+  			   :from (length applied-qubits)
+  			     :below n-qubits
+  			   :collect i)))
+      (loop :for qubit :in applied-qubits
+  	  :for index :upfrom 0
+  	  :do (setf (aref order qubit) index))
+      (loop :for i :from 0 :below n-qubits
+            :when (= (aref order i) -1)
+  	    :do (setf (aref order i) (pop non-visited)))
+      order))
+
   (defun apply-multiq-gate (state unitary qubits)
     (let ((n (dimension-qubits (length state))))
       (labels ((trans-to-op (trans)
                  (reduce #'compose-operator trans
-  		       :key (lambda (i) (lift +swap+ i n)))))
+    		       :key (lambda (i) (lift +swap+ i n)))))
         (let* ((unitary-init (lift unitary 0 n))
                (perm (append (reverse qubits)
-  			   (remove-if (lambda (i) (member i qubits))
+    			   (remove-if (lambda (i) (member i qubits))
                                         (loop for i :below n :collect i))))
                (trans (trans-as-adjacent (perm-as-trans perm)))
                (to->from (trans-to-op trans))
                (from->to (trans-to-op (reverse trans)))
                (unitary-conform (compose-operator to->from
-  						(compose-operator unitary-init
-  								  from->to))))
+    						(compose-operator unitary-init
+    								  from->to))))
           (apply-operator unitary-conform state)))))
 #+end_src
 
@@ -378,7 +397,7 @@ Then the climax:
 
 #+RESULTS:
 : #S(MACHINE
-:    :QUANTUM-STATE #(0.7071067690849304d0 0.0d0 0.0d0 0.7071067690849304d0)
+:    :QUANTUM-STATE #(0.7071067690849304d0 0.7071067690849304d0 0.0d0 0.0d0)
 :    :MEASUREMENT-REGISTER 0)
 
 
@@ -481,22 +500,87 @@ Test what the heck that is doing:
    :MEASUREMENT-REGISTER 0)
 #+end_example
 
+#+begin_src lisp :tangle yes
+  (defun qft-dagger (n)
+    (let ((gates nil))
+      ;; Apply the controlled phase gates and Hadamard gates.
+      (loop :for j :from 0 :below n :do
+        (progn
+          (loop :for m :from 0 :below j :do
+            (push `(GATE ,(cphase (- (/ pi (expt 2 (- j m))))) ,m ,j) gates))
+          (push `(GATE ,+H+ ,j) gates)))
+      gates))
+  (qft-dagger 3)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+((GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
+ (GATE
+  #2A((1 0 0 0) (0 1 0 0) (0 0 1 0) (0 0 0 #C(6.123233995736766d-17 -1.0d0))) 1
+  2)
+ (GATE
+  #2A((1 0 0 0)
+      (0 1 0 0)
+      (0 0 1 0)
+      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
+  0 2)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
+ (GATE
+  #2A((1 0 0 0) (0 1 0 0) (0 0 1 0) (0 0 0 #C(6.123233995736766d-17 -1.0d0))) 0
+  1)
+ (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0))
+#+end_example
+
 ** Quantum subroutine of Shor's algorithm
 
-Let's define the period finding circuit of 15 with a "random" choice of \(a=11\):
+Let's define the period finding circuit of 15 with a "random" choice of \(a=11\). For reference, I also add the Qiskit circuit:
+
+#+begin_src python
+  import math
+  import Qconfig
+  from qiskit import QuantumCircuit, QuantumProgram
+
+  # Quantum program setup 
+  Q_program = QuantumProgram()
+  Q_program.set_api(Qconfig.APItoken, Qconfig.config["url"])
+  q = Q_program.create_quantum_register("q", 5)
+  c = Q_program.create_classical_register("c", 5)
+
+  # Adding gates
+  shor11_15 = Q_program.create_circuit("shor11_15", [q], [c])
+  shor11_15.h(q[2])
+  shor11_15.h(q[3])
+  shor11_15.h(q[4])
+  shor11_15.cx (q[2],q[1])
+  shor11_15.cx (q[2],q[0])
+  shor11_15.h (q[3])
+  shor11_15.cu1(math.pi/2.0, q[3], q[4])
+  shor11_15.h (q[4])
+  shor11_15.cu1(math.pi/4.0, q[3], q[2])
+  shor11_15.cu1(math.pi/2.0, q[4], q[2])
+  shor11_15.h (q[2])
+
+  # Measurement
+  for i in range(2,5):
+      shor11_15.measure(q[i], c[i])
+  print(shor11_15.qasm())
+#+end_src
+
+And here is the cool lisp thing:
 
 #+begin_src lisp :tangle yes
   (defun shor-fifteen ()
-    `((GATE ,+H+ 0)
-      (GATE ,+H+ 1)
-      (GATE ,+H+ 2)
-      (GATE ,+CNOT+ 2 3)
-      (GATE ,+CNOT+ 2 4)
-      (GATE ,+H+ 1)
-      (GATE ,(cphase-reorder (/ pi 2)) 0 1)
-      (GATE ,+H+ 0)
-      (GATE ,(cphase (/ pi 4)) 1 2)
-      (GATE ,(cphase (/ pi 2)) 0 2)
+    `((GATE ,+H+ 2)
+      (GATE ,+H+ 3)
+      (GATE ,+H+ 4)
+      (GATE ,+CNOT+ 2 1)
+      (GATE ,+CNOT+ 2 0)
+      (GATE ,+H+ 3)
+      (GATE ,(cphase (/ pi 2)) 3 4)
+      (GATE ,+H+ 4)
+      (GATE ,(cphase (/ pi 4)) 3 2)
+      (GATE ,(cphase (/ pi 2)) 4 2)
       (GATE ,+H+ 2)
       (MEASURE)))
 #+end_src
@@ -515,11 +599,14 @@ Hopefully we find a period of 4 somewhere:
 
 #+RESULTS:
 : #S(MACHINE
-:    :QUANTUM-STATE #(0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
+:    :QUANTUM-STATE #(1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
 :                     0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
-:                     0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
+:                     0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0
 :                     0.0d0 0.0d0)
-:    :MEASUREMENT-REGISTER 24)
+:    :MEASUREMENT-REGISTER 0)
+
+The next procedure accumulates the counts of the 3-bit prefix string that represent the control register. This amounts to computing the marginal
+probabilities:
 
 #+begin_src lisp :tangle yes
   (defun counts (realizations qubits q-circuit &rest args)
@@ -533,17 +620,33 @@ Hopefully we find a period of 4 somewhere:
           (dotimes (j hilbert)
             (when (> (aref state j) 0) (incf (aref results j))))))))
 
-  (counts 100 5 #'shor-fifteen)
+  (defun counts-control (cnt)
+    (let ((counts-prefix
+  	  (coerce 
+  	   (loop :for i :from 0 :below (length cnt) :by 4
+  		 :collecting (reduce '+ (subseq cnt i (min (+ i 4) (length cnt)))))
+  	   'vector)))
+      counts-prefix))
 #+end_src
 
 #+RESULTS:
-| 24 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 23 | 0 | 0 | 0 | 22 | 0 | 0 | 0 |
+: COUNTS-CONTROL
+
+#+begin_src lisp :tangle yes
+  (counts-control (counts 1024 5 #'shor-fifteen))
+#+end_src
+
+#+RESULTS:
+| 500 | 524 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+This results match the QASM results, as in the reference arXiv:1804.03719v3. The second period is =001=, which corresponds to 4
+in colexicographic order.
 
 ** Another version of Shor's subroutine for 15 (incomplete)
 
 This is the full circuit for \(N=15\) and base \(a=11\), taken from this reference [[https://arxiv.org/abs/2306.09122][2306.09122]]. The circuit will have \(m=9\)
 qubits in the control register and \(n=4\) qubits in the work register (length of 15's binary representation). We will manually
-build the modular exponentiation gates of the quantum phase estimation part, and define the inverse QFT:
+build the modular exponentiation gates of the quantum phase estimation part:
 
 #+begin_src lisp :tangle yes
   (defun quantum-modular-exponentiation (exponent n-control)
@@ -557,48 +660,6 @@ build the modular exponentiation gates of the quantum phase estimation part, and
 
 #+RESULTS:
 | 1.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 | 0.0d0 |
-
-#+begin_src lisp :tangle yes
-  (defun qft-dagger (n)
-    (let ((gates nil))
-      ;; Apply the controlled phase gates and Hadamard gates.
-      (loop :for j :from 0 :below n :do
-            (progn
-              (loop :for m :from 0 :below j :do
-                    (push `(GATE ,(cphase (- (/ pi (expt 2 (1+ (- j m)))))) ,m ,j) gates))
-              (push `(GATE ,+H+ ,j) gates)))
-      ;; Perform bit reversal by swapping qubits.
-      (loop :for q :from 0 :below (floor n 2) :do
-            (push `(GATE ,+swap+ ,q ,(- n q 1)) gates))
-      gates))
-  (qft-dagger 3)
-#+end_src
-
-#+RESULTS:
-#+begin_example
-((GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 0 2)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
-  1 2)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
-  0 2)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
-  0 1)
- (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0))
-#+end_example
 
 The full circuit is then:
 
@@ -726,27 +787,20 @@ gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CN
       (0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 0.0d0 1.0d0 0.0d0))
   0 3 4)
  (GATE #2A((1 0 0 0) (0 1 0 0) (0 0 0 1) (0 0 1 0)) 4 3)
- (GATE #2A((1 0 0 0) (0 0 1 0) (0 1 0 0) (0 0 0 1)) 0 2)
  (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 2)
+ (GATE
+  #2A((1 0 0 0) (0 1 0 0) (0 0 1 0) (0 0 0 #C(6.123233995736766d-17 -1.0d0))) 1
+  2)
  (GATE
   #2A((1 0 0 0)
       (0 1 0 0)
       (0 0 1 0)
       (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
-  1 2)
- (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.9238795325112867d0 -0.3826834323650898d0)))
   0 2)
  (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 1)
  (GATE
-  #2A((1 0 0 0)
-      (0 1 0 0)
-      (0 0 1 0)
-      (0 0 0 #C(0.7071067811865476d0 -0.7071067811865475d0)))
-  0 1)
+  #2A((1 0 0 0) (0 1 0 0) (0 0 1 0) (0 0 0 #C(6.123233995736766d-17 -1.0d0))) 0
+  1)
  (GATE #2A((0.70710677 0.70710677) (0.70710677 -0.70710677)) 0) (MEASURE))
 #+end_example
 
@@ -765,34 +819,19 @@ gates \(U_a^x\) for \(x \in [2^0, 2^1, 2^2]\) are then factorized in terms of CN
 :    :MEASUREMENT-REGISTER 27)
 
 #+begin_src lisp :tangle yes
-  (counts 100 5 #'shor-21 3 2)
+  (counts 1024 5 #'shor-21 3 2)
 #+end_src
 
 #+RESULTS:
-| 14 | 5 | 1 | 4 | 1 | 3 | 6 | 7 | 4 | 0 | 0 | 3 | 0 | 5 | 8 | 0 | 11 | 0 | 3 | 2 | 0 | 0 | 10 | 13 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-
-The next procedure accumulates the counts of the 3-bit prefix string that represent the control register. This amounts to computing the marginal
-probabilities:
-
-#+begin_src lisp :tangle yes
-  (defun counts-control (cnt)
-    (let ((counts-prefix
-  	  (coerce 
-  	   (loop :for i :from 0 :below (length cnt) :by 4
-  		 :collecting (reduce '+ (subseq cnt i (min (+ i 4) (length cnt)))))
-  	   'vector)))
-      counts-prefix))
-#+end_src
-
-#+RESULTS:
-: COUNTS-CONTROL
+| 1024 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 The dominant experimental entries are =000=, =011=, =101=, but only the last two are relevant. Since we use lexicographic order,
 they are the 0, 3 and 5 elements respectively.
 
 #+begin_src lisp :tangle yes
-  (counts-control (counts 1000 5 #'shor-21 3 2))
+  (counts-control (counts 100 5 #'shor-21 3 2))
 #+end_src
 
 #+RESULTS:
-| 203 | 195 | 131 | 131 | 181 | 159 | 0 | 0 |
+| 26 | 22 | 10 | 10 | 16 | 16 | 0 | 0 |
+
