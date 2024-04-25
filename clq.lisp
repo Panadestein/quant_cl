@@ -276,6 +276,8 @@
 	   'vector)))
     counts-prefix))
 
+(counts 100 5 #'shor-fifteen)
+
 (counts-control (counts 1024 5 #'shor-fifteen))
 
 (defun quantum-modular-exponentiation (exponent n-control)
