@@ -22,7 +22,7 @@ $L_U = I \otimes \cdots U \cdots \otimes I$
 
 and evolve it:
 
-$\Psi_m^n = \Psi_0^n \prod_i^m L_{U_i}$
+$$\Psi_m^n = \Psi_0^n \prod_i^m L_{U_i}$$
 
 The measurement is done by sampling the CDF of the squared amplitudes of the states.
 But please see the org-mode file for the gory details.
