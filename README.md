@@ -15,7 +15,7 @@ interpreter with Emacs, Slime and Org-mode.
 ## Overview
 
 The interpreter's idea is simple: evolve the wave function $\Psi_0^n$ in the full
-Hilbert space, that means \$2^n \times 2^n\$ if we use $\n$\ qubits. Then construct
+Hilbert space, that means $2^n \times 2^n$ if we use $n$ qubits. Then construct
 the full gates by lifting:
 
 $L_U = I \otimes \cdots U \cdots \otimes I$
