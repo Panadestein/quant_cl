@@ -253,16 +253,18 @@
                    :measurement-register 0))
 
 (defun shor-fifteen ()
-  `((GATE ,+H+ 2)
-    (GATE ,+H+ 3)
-    (GATE ,+H+ 4)
-    (GATE ,+CNOT+ 2 1)
-    (GATE ,+CNOT+ 2 0)
-    (GATE ,+H+ 3)
-    (GATE ,(cphase (/ pi 2)) 3 4)
-    (GATE ,+H+ 4)
-    (GATE ,(cphase (/ pi 4)) 3 2)
-    (GATE ,(cphase (/ pi 2)) 4 2)
+  `((GATE ,+H+ 0)
+    (GATE ,+H+ 1)
+    (GATE ,+H+ 2)
+    (GATE ,+CNOT+ 2 3)
+    (GATE ,+CNOT+ 2 4)
+    (GATE ,+H+ 1)
+    (GATE ,+SWAP+ 0 1)
+    (GATE ,(cphase (/ pi 2)) 0 1)
+    (GATE ,+SWAP+ 0 1)
+    (GATE ,+H+ 0)
+    (GATE ,(cphase (/ pi 4)) 1 2)
+    (GATE ,(cphase (/ pi 2)) 0 2)
     (GATE ,+H+ 2)
     (MEASURE)))
 
@@ -277,22 +279,22 @@
         (dotimes (j hilbert)
           (when (> (aref state j) 0) (incf (aref results j))))))))
 
-(defun counts-control (cnt)
-  (let ((counts-prefix
-	  (coerce 
-	   (loop :for i :from 0 :below (length cnt) :by 4
-		 :collecting (reduce '+ (subseq cnt i (min (+ i 4) (length cnt)))))
-	   'vector)))
-    counts-prefix))
+(defun counts-control (cnt n-control)
+  (let* ((bits-control (expt 2 n-control))
+	 (result (make-array bits-control :initial-element 0)))
+    (loop :for i :from 0 :below (length cnt) :by bits-control
+          :do
+	     (loop :for j :from 0 :below bits-control
+                   :do (incf (aref result j) (aref cnt (+ i j)))))
+    result))
 
-(counts-control (counts 1024 5 #'shor-fifteen))
+(counts-control (counts 1024 5 #'shor-fifteen) 3)
 
 (defun factorization (control-state N a n-control)
   (let* ((max-val (position (reduce 'max (cdr control-state)) control-state))
-	 (p (ash max-val 2))
-	 (r (/ (expt 2 n-control) p)))
+	 (r (/ (expt 2 n-control) max-val)))
     (list (gcd (1+ (expt a (/ r 2))) N)
           (gcd (1- (expt a (/ r 2))) N))))
 
-(let ((register-counts (quote (548 476 0 0 0 0 0 0))))
+(let ((register-counts (quote (525 0 0 0 499 0 0 0))))
 (factorization register-counts 15 11 3))
