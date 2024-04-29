@@ -1,4 +1,4 @@
-# TITLE: A quantum interpreter written in Lisp
+# A quantum interpreter written in Lisp
 
 This repository contains `clq`, my implementation in Common Lisp of a quantum computer
 interpreter. It is based on the excellent tutorial by Robert Smith, which you can find [here](https://www.stylewarning.com/posts/quantum-interpreter/).
