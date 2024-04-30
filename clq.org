@@ -220,13 +220,13 @@ With the above definition, the lift operator can be implemented as:
 
 Note that the above function accounts for multiple adjacent qubit gates. Multiple non-adjacent
 qubit gates' actions are a bit trickier to handle. The idea is to generate a permutation matrix
-\(\Pi\) that will set the qubit temporarily adjacent, apply the gate, and restores the initial order:
+\(\Pi\) that will set the qubits temporarily adjacent, apply the gate, and restores the initial order:
 
 \begin{equation}
  \Pi^{-1}\text{lift}(g, 0, n)\Pi
 \end{equation}
 
-We then define the *SWAP* gate (or Fredkin gate), which exchanges the states of two qubits:
+We then define the *SWAP* gate (the controlled version of this one is called Fredkin gate), which exchanges the states of two qubits:
 
 #+begin_src lisp :tangle yes
   (defparameter +SWAP+ #2A((1 0 0 0)
@@ -294,41 +294,22 @@ to implement two qubit gates:
     (apply-operator (lift unitary q (dimension-qubits (length state)))
                     state))
 
-  ;; Not what you think see bullets above!
-  ;; This will confuse you time and again if you don't remember
-  ;; that the permutation refers to the index of the value in
-  ;; the new arrangement, not the actual value!
-  ;; Do not use this function!
-  (defun generate-permutation (applied-qubits n-qubits)
-    (let ((order (make-array n-qubits :initial-element -1))
-  	(non-visited (loop :for i
-  			   :from (length applied-qubits)
-  			     :below n-qubits
-  			   :collect i)))
-      (loop :for qubit :in applied-qubits
-  	  :for index :upfrom 0
-  	  :do (setf (aref order qubit) index))
-      (loop :for i :from 0 :below n-qubits
-            :when (= (aref order i) -1)
-  	    :do (setf (aref order i) (pop non-visited)))
-      order))
-
   (defun apply-multiq-gate (state unitary qubits)
     (let ((n (dimension-qubits (length state))))
-      (labels ((trans-to-op (trans)
-                 (reduce #'compose-operator trans
-    		       :key (lambda (i) (lift +swap+ i n)))))
-        (let* ((unitary-init (lift unitary 0 n))
-               (perm (append (reverse qubits)
-    			   (remove-if (lambda (i) (member i qubits))
-                                        (loop for i :below n :collect i))))
-               (trans (trans-as-adjacent (perm-as-trans perm)))
-               (to->from (trans-to-op trans))
-               (from->to (trans-to-op (reverse trans)))
-               (unitary-conform (compose-operator to->from
-    						(compose-operator unitary-init
-    								  from->to))))
-          (apply-operator unitary-conform state)))))
+      (let* ((unitary-init (lift unitary 0 n))
+             (perm (append (reverse qubits)
+                           (remove-if (lambda (i) (member i qubits))
+                                      (loop for i :below n :collect i))))
+             (trans (trans-as-adjacent (perm-as-trans perm))))
+        (if trans
+            (let ((to->from (reduce #'compose-operator trans
+                                    :key (lambda (i) (lift +swap+ i n))))
+                  (from->to (reduce #'compose-operator (reverse trans)
+                                    :key (lambda (i) (lift +swap+ i n)))))
+              (apply-operator (compose-operator to->from
+                                                (compose-operator unitary-init from->to))
+                              state))
+            (apply-operator unitary-init state)))))
 #+end_src
 
 #+RESULTS:
@@ -562,9 +543,7 @@ that we use information about the modular exponentiation procedure to reduce the
       (GATE ,+CNOT+ 2 3)
       (GATE ,+CNOT+ 2 4)
       (GATE ,+H+ 1)
-      (GATE ,+SWAP+ 0 1)
-      (GATE ,(cphase (/ pi 2)) 0 1)
-      (GATE ,+SWAP+ 0 1)
+      (GATE ,(cphase (/ pi 2)) 1 0)
       (GATE ,+H+ 0)
       (GATE ,(cphase (/ pi 4)) 1 2)
       (GATE ,(cphase (/ pi 2)) 0 2)
@@ -575,11 +554,8 @@ that we use information about the modular exponentiation procedure to reduce the
 #+RESULTS:
 : SHOR-FIFTEEN
 
-The extra =+SWAP+= gates in the first =cphase= are needed to correct the order of the qubits. This is a limitation of the =clq= interpreter,
-which unfortunately does not handle reversed order gates efficiently. We will see in that for the quantum experiment in IBM devices this is not
-needed, although it is completely equivalent. In order to interpret the results of the measurement, we need to define two auxiliary procedures.
-The first one records the counts for each component of the state vector, and the second one computes the marginal counts for the first three qubits.
-This is just a hack the we use to simulate partial measurements.
+In order to interpret the results of the measurement, we need to define two auxiliary procedures. The first one records the counts for each component
+of the state vector, and the second one computes the marginal counts for the first three qubits. This is just a hack the we use to simulate partial measurements.
 
 #+begin_src lisp :tangle yes
   (defun counts (realizations qubits q-circuit &rest args)
@@ -615,7 +591,7 @@ to get the marginal probabilities:
 #+end_src
 
 #+RESULTS: simulation-results
-| 507 | 0 | 0 | 0 | 517 | 0 | 0 | 0 |
+| 494 | 0 | 0 | 0 | 530 | 0 | 0 | 0 |
 
 The first peak corresponds to the =000= string which yields a trivial period. The second peak is the right answer,
 =100= corresponds to the number 4 in decimal.
@@ -644,7 +620,8 @@ The previous ideas are crystallized in this procedure:
 
 #+begin_src lisp :tangle yes
   (defun factorization (control-state N a n-control)
-    (let* ((max-val (position (reduce 'max (cdr control-state)) control-state))
+    (let* ((counts (cdr control-state))
+  	 (max-val (1+ (position (reduce 'max counts) counts)))
   	 (r (/ (expt 2 n-control) max-val)))
       (list (gcd (1+ (expt a (/ r 2))) N)
             (gcd (1- (expt a (/ r 2))) N))))

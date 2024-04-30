@@ -118,41 +118,22 @@
   (apply-operator (lift unitary q (dimension-qubits (length state)))
                   state))
 
-;; Not what you think see bullets above!
-;; This will confuse you time and again if you don't remember
-;; that the permutation refers to the index of the value in
-;; the new arrangement, not the actual value!
-;; Do not use this function!
-(defun generate-permutation (applied-qubits n-qubits)
-  (let ((order (make-array n-qubits :initial-element -1))
-	(non-visited (loop :for i
-			   :from (length applied-qubits)
-			     :below n-qubits
-			   :collect i)))
-    (loop :for qubit :in applied-qubits
-	  :for index :upfrom 0
-	  :do (setf (aref order qubit) index))
-    (loop :for i :from 0 :below n-qubits
-          :when (= (aref order i) -1)
-	    :do (setf (aref order i) (pop non-visited)))
-    order))
-
 (defun apply-multiq-gate (state unitary qubits)
   (let ((n (dimension-qubits (length state))))
-    (labels ((trans-to-op (trans)
-               (reduce #'compose-operator trans
-  		       :key (lambda (i) (lift +swap+ i n)))))
-      (let* ((unitary-init (lift unitary 0 n))
-             (perm (append (reverse qubits)
-  			   (remove-if (lambda (i) (member i qubits))
-                                      (loop for i :below n :collect i))))
-             (trans (trans-as-adjacent (perm-as-trans perm)))
-             (to->from (trans-to-op trans))
-             (from->to (trans-to-op (reverse trans)))
-             (unitary-conform (compose-operator to->from
-  						(compose-operator unitary-init
-  								  from->to))))
-        (apply-operator unitary-conform state)))))
+    (let* ((unitary-init (lift unitary 0 n))
+           (perm (append (reverse qubits)
+                         (remove-if (lambda (i) (member i qubits))
+                                    (loop for i :below n :collect i))))
+           (trans (trans-as-adjacent (perm-as-trans perm))))
+      (if trans
+          (let ((to->from (reduce #'compose-operator trans
+                                  :key (lambda (i) (lift +swap+ i n))))
+                (from->to (reduce #'compose-operator (reverse trans)
+                                  :key (lambda (i) (lift +swap+ i n)))))
+            (apply-operator (compose-operator to->from
+                                              (compose-operator unitary-init from->to))
+                            state))
+          (apply-operator unitary-init state)))))
 
 (defun clq (qprog machine)
   (loop :for (instruction . parameters) :in qprog
@@ -259,9 +240,7 @@
     (GATE ,+CNOT+ 2 3)
     (GATE ,+CNOT+ 2 4)
     (GATE ,+H+ 1)
-    (GATE ,+SWAP+ 0 1)
-    (GATE ,(cphase (/ pi 2)) 0 1)
-    (GATE ,+SWAP+ 0 1)
+    (GATE ,(cphase (/ pi 2)) 1 0)
     (GATE ,+H+ 0)
     (GATE ,(cphase (/ pi 4)) 1 2)
     (GATE ,(cphase (/ pi 2)) 0 2)
@@ -291,10 +270,11 @@
 (counts-control (counts 1024 5 #'shor-fifteen) 3)
 
 (defun factorization (control-state N a n-control)
-  (let* ((max-val (position (reduce 'max (cdr control-state)) control-state))
+  (let* ((counts (cdr control-state))
+	 (max-val (1+ (position (reduce 'max counts) counts)))
 	 (r (/ (expt 2 n-control) max-val)))
     (list (gcd (1+ (expt a (/ r 2))) N)
           (gcd (1- (expt a (/ r 2))) N))))
 
-(let ((register-counts (quote (525 0 0 0 499 0 0 0))))
+(let ((register-counts (quote (496 0 0 0 528 0 0 0))))
 (factorization register-counts 15 11 3))
